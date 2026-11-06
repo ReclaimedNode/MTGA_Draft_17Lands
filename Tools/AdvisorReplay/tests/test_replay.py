@@ -110,3 +110,22 @@ def test_lens_replay_matches_drafts_with_plain_replay(tmp_path, names):
     base, head = outs["base"]["drafts"][0], outs["head"]["drafts"][0]
     assert len(base["picks"]) == len(head["picks"]) > 0
     assert head["deck_score"] == base["deck_score"]  # the lens only changes picks
+
+
+def test_lens_off_switches_pieces(tmp_path, names):
+    from src.advisor.archetype_lens import ArchetypeLens
+
+    drafts = tmp_path / "drafts.json.gz"
+    with gzip.open(drafts, "wt") as f:
+        json.dump([draft(names, 10)], f)
+    out = tmp_path / "head.json"
+    try:
+        replay.main(
+            ["--src", ROOT, "--drafts", str(drafts), "--dataset", DATASET, "--set", "MKM",
+             "--label", "head", "--lens", "--lens-off", "key,flex", "--out", str(out)]
+        )
+        assert ArchetypeLens.DISABLED == frozenset({"key", "flex"})
+        with pytest.raises(SystemExit):
+            replay.App(DATASET, lens=True, lens_off="bogus")
+    finally:
+        ArchetypeLens.DISABLED = frozenset()

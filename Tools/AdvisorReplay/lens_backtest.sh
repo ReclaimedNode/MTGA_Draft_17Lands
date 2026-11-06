@@ -47,13 +47,33 @@ if [ ! -s "$SAMPLE" ]; then
   $PY Tools/AdvisorReplay/sample.py --dump "$DUMP" --drafts "$DRAFTS" --salt "$SALT" --out "$SAMPLE"
 fi
 
-echo "Replaying without the lens..."
-$PY Tools/AdvisorReplay/replay.py --src . --drafts "$SAMPLE" --dataset "$DATASET" \
-  --set "$SET" --label base --out "$OUT/$SET.base.json"
-echo "Replaying with the lens..."
-$PY Tools/AdvisorReplay/replay.py --src . --drafts "$SAMPLE" --dataset "$DATASET" \
-  --set "$SET" --label head --lens --out "$OUT/$SET.head.json"
+BASE="$OUT/$SET.base.$SALT.json"
+if [ ! -s "$BASE" ]; then
+  echo "Replaying without the lens..."
+  $PY Tools/AdvisorReplay/replay.py --src . --drafts "$SAMPLE" --dataset "$DATASET" \
+    --set "$SET" --label base --out "$BASE"
+fi
 
-$PY Tools/AdvisorReplay/report.py "$OUT/$SET.base.json" "$OUT/$SET.head.json" | tee "$OUT/lens_$SET.md"
+# ABLATE=1 also tests the lens with each piece switched off, one at a time.
+VARIANTS="full"
+if [ "${ABLATE:-0}" = "1" ]; then
+  VARIANTS="full no-delta no-key no-flex only-flex"
+fi
+for V in $VARIANTS; do
+  case "$V" in
+    full) OFF="" ;;
+    no-delta) OFF="delta" ;;
+    no-key) OFF="key" ;;
+    no-flex) OFF="flex" ;;
+    only-flex) OFF="delta,key" ;;
+  esac
+  echo "Replaying with the lens ($V)..."
+  HEAD="$OUT/$SET.head.$V.$SALT.json"
+  $PY Tools/AdvisorReplay/replay.py --src . --drafts "$SAMPLE" --dataset "$DATASET" \
+    --set "$SET" --label head --lens --lens-off "$OFF" --out "$HEAD"
+  $PY Tools/AdvisorReplay/report.py "$BASE" "$HEAD" > "$OUT/lens_${SET}_${V}_${SALT}.md"
+  echo "== $V =="
+  grep -E "^Top-1, head minus base|regret:" "$OUT/lens_${SET}_${V}_${SALT}.md" || true
+done
 echo
-echo "Report saved to $OUT/lens_$SET.md ('head' is the lens; 'base' is the plain advisor)."
+echo "Full reports: $OUT/lens_${SET}_<variant>_${SALT}.md ('head' is the lens; 'base' is the plain advisor)."

@@ -226,6 +226,9 @@ class ArchetypeSheet:
 class ArchetypeLens:
     """Lane probabilities for one pool, and the card adjustments built on them."""
 
+    # Pieces that can be switched off (for backtesting): "delta" (#1),
+    # "key" (#2), "flex" (#3).
+    DISABLED: frozenset = frozenset()
     # Lane model
     PRIOR_WEIGHT = 0.15
     DELTA_TIP = 0.25  # how much the pair's overall deck win rate matters
@@ -324,6 +327,8 @@ class ArchetypeLens:
 
     def expected_delta(self, card: Dict) -> Tuple[float, str]:
         """(expected shrunk delta over castable lanes, the lane contributing most)."""
+        if "delta" in self.DISABLED:
+            return 0.0, ""
         pairs = self._pairs(card)
         mass = sum(self.lane_probs[p] for p in pairs)
         if mass <= 0:
@@ -340,6 +345,8 @@ class ArchetypeLens:
     # --- #2: key cards and themes ---------------------------------------
 
     def key_card_bonus(self, card: Dict) -> Tuple[float, str]:
+        if "key" in self.DISABLED:
+            return 1.0, ""
         name = str(card.get(constants.DATA_FIELD_NAME, ""))
         best_mult, best_reason = 1.0, ""
         for pair, prob in self.top_lanes(3):
@@ -374,7 +381,7 @@ class ArchetypeLens:
     def flexibility_mult(
         self, card: Dict, pack: int, effective_pick: int, pack_mean_mass: float
     ) -> float:
-        if pack != 1 or effective_pick >= self.FLEX_LAST_PICK:
+        if "flex" in self.DISABLED or pack != 1 or effective_pick >= self.FLEX_LAST_PICK:
             return 1.0
         fade = 1.0 - (effective_pick - 1) / (self.FLEX_LAST_PICK - 1)
         mult = 1.0 + self.FLEX_WEIGHT * fade * (self.castable_mass(card) - pack_mean_mass)

@@ -28,7 +28,7 @@ DECK_SIZE = 23
 class App:
     """The advisor, deck builder and card data, from the src/ on sys.path."""
 
-    def __init__(self, dataset_path, lens=False, set_code=""):
+    def __init__(self, dataset_path, lens=False, set_code="", lens_off=""):
         from src import card_logic, constants
         from src.advisor.engine import DraftAdvisor
         from src.dataset import Dataset
@@ -53,7 +53,13 @@ class App:
         # --lens: score with the Archetype Lens (older copies of the app lack it).
         self.lens_factory = None
         if lens:
-            from src.advisor.archetype_lens import make_lens_factory
+            from src.advisor.archetype_lens import ArchetypeLens, make_lens_factory
+
+            off = frozenset(p.strip() for p in lens_off.split(",") if p.strip())
+            unknown = off - {"delta", "key", "flex"}
+            if unknown:
+                raise SystemExit(f"--lens-off: unknown pieces {sorted(unknown)}")
+            ArchetypeLens.DISABLED = off
 
             self.lens_factory = make_lens_factory(self.dataset, set_code)
 
@@ -210,12 +216,17 @@ def main(argv=None):
         help="Score with the Archetype Lens (compare a --lens head with a plain base)",
     )
     parser.add_argument(
+        "--lens-off",
+        default="",
+        help="With --lens, switch pieces off: any of delta,key,flex (comma-separated)",
+    )
+    parser.add_argument(
         "--out", required=True, help="Where to write the results (.json)"
     )
     args = parser.parse_args(argv)
 
     sys.path.insert(0, os.path.abspath(args.src))
-    app = App(args.dataset, lens=args.lens, set_code=args.set)
+    app = App(args.dataset, lens=args.lens, set_code=args.set, lens_off=args.lens_off)
     with gzip.open(args.drafts, "rt", encoding="utf-8") as f:
         drafts = json.load(f)
 
