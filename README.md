@@ -10,6 +10,8 @@ Magic: The Gathering Arena draft tool that utilizes 17Lands data.
 
 > **This fork adds the Archetype Lens:** color-pair-aware pick scoring (lane probabilities from pick 1, archetype overperformers, per-set key-card sheets, and pack-1 lane flexibility), plus a one-command backtest against real 17Lands drafts. See [docs/ARCHETYPE_LENS.md](docs/ARCHETYPE_LENS.md). Toggle it in File → Preferences.
 >
+> **Quick Draft bot model:** `Tools/BotModel/bot_model.sh <SET>` learns what Arena's bots pick from 17Lands Quick Draft data; the advisor then uses it for wheel chances in that set's Quick Drafts. See [docs/BOT_MODEL.md](docs/BOT_MODEL.md).
+>
 > **Running from source on a Mac:**
 > ```sh
 > brew install python@3.13 python-tk@3.13     # Tk is needed for the window

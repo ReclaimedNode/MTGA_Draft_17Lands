@@ -15,6 +15,7 @@ from src import constants
 from src.configuration import write_configuration
 from src.advisor.engine import DraftAdvisor
 from src.advisor.archetype_lens import make_lens_factory
+from src.advisor.bot_model import BotModel
 from src.signals import SignalCalculator
 from src.card_logic import filter_options, get_deck_metrics
 from src.app_update import AppUpdate
@@ -234,7 +235,16 @@ class AppController:
                     )
                 except Exception as e:
                     logging.getLogger(__name__).warning(f"Archetype Lens off: {e}")
-            advisor = DraftAdvisor(metrics, taken_cards, lens_factory=lens_factory)
+            bot_model = None
+            if et and "QuickDraft" in et and "PickTwo" not in et and es:
+                key = (es, et)
+                if getattr(self, "_bot_model_key", None) != key:
+                    self._bot_model_key = key
+                    self._bot_model = BotModel.load(es, "QuickDraft")
+                bot_model = self._bot_model
+            advisor = DraftAdvisor(
+                metrics, taken_cards, lens_factory=lens_factory, bot_model=bot_model
+            )
             recommendations = advisor.evaluate_pack(
                 pack_cards, pi, current_pack=pk,
                 cards_per_pick=cards_per_pick,

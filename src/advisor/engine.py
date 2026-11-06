@@ -46,7 +46,9 @@ class DraftAdvisor:
     # this many points (15 points is one standard deviation of win rate).
     ARCH_REASON_POINTS = 5.0
 
-    def __init__(self, set_metrics, taken_cards: List[Dict], lens_factory=None):
+    def __init__(
+        self, set_metrics, taken_cards: List[Dict], lens_factory=None, bot_model=None
+    ):
         """lens_factory: optional callable(set_metrics, pool) -> ArchetypeLens.
 
         With no factory the advisor scores exactly as before. With one, the
@@ -56,6 +58,9 @@ class DraftAdvisor:
         self.metrics = set_metrics
         self.pool = taken_cards or []
         self.lens = lens_factory(set_metrics, self.pool) if lens_factory else None
+        # Quick Draft: a fitted BotModel (src/advisor/bot_model.py) replaces the
+        # ALSA wheel curve with what the bots actually take.
+        self.bot_model = bot_model
 
         # 1. Base statistical baselines
         self.global_mean, self.global_std = self.metrics.get_metrics(
@@ -129,6 +134,10 @@ class DraftAdvisor:
             str(c.get("name", "Unknown")).strip(): i
             for i, c in enumerate(pack_cards_sorted)
         }
+        pack_names = [str(c.get("name", "Unknown")).strip() for c in pack_cards]
+        pack_names_by_wr = [
+            str(c.get("name", "Unknown")).strip() for c in pack_cards_sorted
+        ]
 
         pack_mean_mass = (
             statistics.mean(self.lens.castable_mass(c) for c in pack_cards)
@@ -203,12 +212,28 @@ class DraftAdvisor:
 
                 # --- STEP 6: Wheel chance (shown, not scored) ---
                 rank_in_pack = pack_ranks.get(name, 99)
-                wheel_pct = self._wheel_chance(
-                    card, safe_pick, rank_in_pack,
-                    pack_size=len(pack_cards),
-                    cards_per_pick=cards_per_pick,
-                    number_of_players=number_of_players,
-                )
+                if (
+                    self.bot_model is not None
+                    and cards_per_pick == 1
+                    and number_of_players == 8
+                ):
+                    # Assume you take the pack's best card by GIH WR (the
+                    # second best if this is it), then the bots pick.
+                    you_take = pack_names_by_wr[0] if pack_names_by_wr else ""
+                    if you_take == name and len(pack_names_by_wr) > 1:
+                        you_take = pack_names_by_wr[1]
+                    wheel_pct = round(
+                        self.bot_model.wheel_chance(pack_names, name, you_take), 1
+                    )
+                    if wheel_pct >= 60 and z_score >= 0.5:
+                        reasons.append(f"Bots likely pass it (wheels {wheel_pct:.0f}%)")
+                else:
+                    wheel_pct = self._wheel_chance(
+                        card, safe_pick, rank_in_pack,
+                        pack_size=len(pack_cards),
+                        cards_per_pick=cards_per_pick,
+                        number_of_players=number_of_players,
+                    )
 
                 # === MASTER ALGORITHM ===
                 final_score = (
