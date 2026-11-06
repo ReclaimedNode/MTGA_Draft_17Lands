@@ -13,7 +13,19 @@ set -euo pipefail
 SET="${1:-FRA}"
 DRAFTS="${2:-1000}"
 SALT="${3:-lens}"
-PY="${PYTHON:-python3}"
+# Use the app's Poetry environment when there is one, so numpy etc. are found.
+if [ -n "${PYTHON:-}" ]; then
+  PY="$PYTHON"
+elif command -v poetry >/dev/null 2>&1 && poetry env info -p >/dev/null 2>&1; then
+  PY="poetry run python"
+else
+  PY="python3"
+fi
+if ! $PY -c "import numpy, pydantic" >/dev/null 2>&1; then
+  echo "The app's dependencies aren't installed for: $PY"
+  echo "Run 'poetry install' in this folder first (see the README's Mac setup), then rerun."
+  exit 1
+fi
 CACHE=".cache/backtest/$SET"
 OUT="results"
 mkdir -p "$CACHE" "$OUT"
@@ -32,16 +44,16 @@ if [ ! -s "$DATASET" ]; then
 fi
 if [ ! -s "$SAMPLE" ]; then
   echo "Sampling $DRAFTS drafts..."
-  "$PY" Tools/AdvisorReplay/sample.py --dump "$DUMP" --drafts "$DRAFTS" --salt "$SALT" --out "$SAMPLE"
+  $PY Tools/AdvisorReplay/sample.py --dump "$DUMP" --drafts "$DRAFTS" --salt "$SALT" --out "$SAMPLE"
 fi
 
 echo "Replaying without the lens..."
-"$PY" Tools/AdvisorReplay/replay.py --src . --drafts "$SAMPLE" --dataset "$DATASET" \
+$PY Tools/AdvisorReplay/replay.py --src . --drafts "$SAMPLE" --dataset "$DATASET" \
   --set "$SET" --label base --out "$OUT/$SET.base.json"
 echo "Replaying with the lens..."
-"$PY" Tools/AdvisorReplay/replay.py --src . --drafts "$SAMPLE" --dataset "$DATASET" \
+$PY Tools/AdvisorReplay/replay.py --src . --drafts "$SAMPLE" --dataset "$DATASET" \
   --set "$SET" --label head --lens --out "$OUT/$SET.head.json"
 
-"$PY" Tools/AdvisorReplay/report.py "$OUT/$SET.base.json" "$OUT/$SET.head.json" | tee "$OUT/lens_$SET.md"
+$PY Tools/AdvisorReplay/report.py "$OUT/$SET.base.json" "$OUT/$SET.head.json" | tee "$OUT/lens_$SET.md"
 echo
 echo "Report saved to $OUT/lens_$SET.md ('head' is the lens; 'base' is the plain advisor)."
