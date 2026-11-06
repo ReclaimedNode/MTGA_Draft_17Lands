@@ -129,3 +129,19 @@ def test_lens_off_switches_pieces(tmp_path, names):
             replay.App(DATASET, lens=True, lens_off="bogus")
     finally:
         ArchetypeLens.DISABLED = frozenset()
+
+
+def test_lens_params_override_constants():
+    from src.advisor.archetype_lens import ArchetypeLens, ArchetypeSheet
+    from src.advisor.engine import DraftAdvisor
+
+    saved = (ArchetypeLens.DELTA_TIP, ArchetypeSheet.SHRINK_K, DraftAdvisor.ARCH_WEIGHT_RAMP)
+    try:
+        replay.set_lens_params(["DELTA_TIP=0.5", "SHRINK_K=800", "ARCH_WEIGHT_RAMP=1.0"])
+        assert ArchetypeLens.DELTA_TIP == 0.5
+        assert ArchetypeSheet.SHRINK_K == 800 and isinstance(ArchetypeSheet.SHRINK_K, int)
+        assert DraftAdvisor.ARCH_WEIGHT_RAMP == 1.0
+        with pytest.raises(SystemExit):
+            replay.set_lens_params(["NOPE=1"])
+    finally:
+        ArchetypeLens.DELTA_TIP, ArchetypeSheet.SHRINK_K, DraftAdvisor.ARCH_WEIGHT_RAMP = saved

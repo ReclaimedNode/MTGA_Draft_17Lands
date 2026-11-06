@@ -28,7 +28,7 @@ DECK_SIZE = 23
 class App:
     """The advisor, deck builder and card data, from the src/ on sys.path."""
 
-    def __init__(self, dataset_path, lens=False, set_code="", lens_off=""):
+    def __init__(self, dataset_path, lens=False, set_code="", lens_off="", lens_params=()):
         from src import card_logic, constants
         from src.advisor.engine import DraftAdvisor
         from src.dataset import Dataset
@@ -60,6 +60,7 @@ class App:
             if unknown:
                 raise SystemExit(f"--lens-off: unknown pieces {sorted(unknown)}")
             ArchetypeLens.DISABLED = off
+            set_lens_params(lens_params)
 
             self.lens_factory = make_lens_factory(self.dataset, set_code)
 
@@ -143,6 +144,22 @@ class App:
         return best
 
 
+def set_lens_params(params):
+    """Apply NAME=VALUE overrides to the lens and advisor class constants."""
+    from src.advisor.archetype_lens import ArchetypeLens, ArchetypeSheet
+    from src.advisor.engine import DraftAdvisor
+
+    for item in params or ():
+        name, _, value = item.partition("=")
+        name = name.strip()
+        for cls in (ArchetypeLens, ArchetypeSheet, DraftAdvisor):
+            if name in cls.__dict__ and isinstance(cls.__dict__[name], (int, float)):
+                setattr(cls, name, type(cls.__dict__[name])(float(value)))
+                break
+        else:
+            raise SystemExit(f"--lens-param: no numeric constant named {name!r}")
+
+
 def rank_of(scores, name):
     """0-based rank of name when scores are sorted best first (ties keep order)."""
     return sorted(scores, key=lambda n: -scores[n]).index(name)
@@ -222,12 +239,26 @@ def main(argv=None):
         "(comma-separated). Empty, the default here, turns all three on.",
     )
     parser.add_argument(
+        "--lens-param",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="With --lens, override a numeric constant on ArchetypeLens, "
+        "ArchetypeSheet or DraftAdvisor (repeatable), e.g. DELTA_TIP=0.5",
+    )
+    parser.add_argument(
         "--out", required=True, help="Where to write the results (.json)"
     )
     args = parser.parse_args(argv)
 
     sys.path.insert(0, os.path.abspath(args.src))
-    app = App(args.dataset, lens=args.lens, set_code=args.set, lens_off=args.lens_off)
+    app = App(
+        args.dataset,
+        lens=args.lens,
+        set_code=args.set,
+        lens_off=args.lens_off,
+        lens_params=args.lens_param,
+    )
     with gzip.open(args.drafts, "rt", encoding="utf-8") as f:
         drafts = json.load(f)
 

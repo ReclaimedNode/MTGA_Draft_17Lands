@@ -30,37 +30,51 @@ CACHE=".cache/backtest/$SET"
 OUT="results"
 mkdir -p "$CACHE" "$OUT"
 
+EVENT="${EVENT:-PremierDraft}"
+# Downloads from before Quick Draft support lived one folder up; reuse them.
+if [ "$EVENT" = "PremierDraft" ] && [ -s "$CACHE/dump.csv.gz" ] && [ ! -e "$CACHE/$EVENT" ]; then
+  mkdir -p "$CACHE/$EVENT" && mv "$CACHE"/*.gz "$CACHE/$EVENT"/
+fi
+CACHE="$CACHE/$EVENT"
+mkdir -p "$CACHE"
 DUMP="$CACHE/dump.csv.gz"
 DATASET="$CACHE/dataset.json.gz"
 SAMPLE="$CACHE/drafts_${DRAFTS}_${SALT}.json.gz"
 
 if [ ! -s "$DUMP" ]; then
   echo "Downloading 17Lands draft dump for $SET..."
-  curl -fSLo "$DUMP" "https://17lands-public.s3.amazonaws.com/analysis_data/draft_data/draft_data_public.$SET.PremierDraft.csv.gz"
+  curl -fSLo "$DUMP" "https://17lands-public.s3.amazonaws.com/analysis_data/draft_data/draft_data_public.$SET.$EVENT.csv.gz"
 fi
 if [ ! -s "$DATASET" ]; then
   echo "Downloading app dataset for $SET..."
-  curl -fSLo "$DATASET" "https://unrealities.github.io/MTGA_Draft_17Lands/${SET}_PremierDraft_All_Data.json.gz"
+  curl -fSLo "$DATASET" "https://unrealities.github.io/MTGA_Draft_17Lands/${SET}_${EVENT}_All_Data.json.gz" \
+    || { echo "No $EVENT dataset for $SET; using the Premier Draft ratings."; \
+         curl -fSLo "$DATASET" "https://unrealities.github.io/MTGA_Draft_17Lands/${SET}_PremierDraft_All_Data.json.gz"; }
 fi
 if [ ! -s "$SAMPLE" ]; then
   echo "Sampling $DRAFTS drafts..."
   $PY Tools/AdvisorReplay/sample.py --dump "$DUMP" --drafts "$DRAFTS" --salt "$SALT" --out "$SAMPLE"
 fi
 
-BASE="$OUT/$SET.base.$SALT.json"
+TAG="${SET}_${EVENT}_${SALT}"
+BASE="$OUT/$SET.$EVENT.base.$SALT.json"
 if [ ! -s "$BASE" ]; then
   echo "Replaying without the lens..."
   $PY Tools/AdvisorReplay/replay.py --src . --drafts "$SAMPLE" --dataset "$DATASET" \
     --set "$SET" --label base --out "$BASE"
 fi
 
-# ABLATE=1 also tests the lens with each piece switched off, one at a time.
-VARIANTS="full"
+# "default" is the app's setting (#1 only). ABLATE=1 adds the other variants.
+VARIANTS="default"
 if [ "${ABLATE:-0}" = "1" ]; then
-  VARIANTS="full no-delta no-key no-flex only-flex"
+  VARIANTS="default full no-delta no-key no-flex only-flex"
 fi
+# PARAMS="DELTA_TIP=0.5 SHRINK_K=800" overrides lens constants for every variant.
+PARAM_ARGS=""
+for P in ${PARAMS:-}; do PARAM_ARGS="$PARAM_ARGS --lens-param $P"; done
 for V in $VARIANTS; do
   case "$V" in
+    default) OFF="key,flex" ;;
     full) OFF="" ;;
     no-delta) OFF="delta" ;;
     no-key) OFF="key" ;;
@@ -68,12 +82,12 @@ for V in $VARIANTS; do
     only-flex) OFF="delta,key" ;;
   esac
   echo "Replaying with the lens ($V)..."
-  HEAD="$OUT/$SET.head.$V.$SALT.json"
+  HEAD="$OUT/$SET.$EVENT.head.$V.$SALT.json"
   $PY Tools/AdvisorReplay/replay.py --src . --drafts "$SAMPLE" --dataset "$DATASET" \
-    --set "$SET" --label head --lens --lens-off "$OFF" --out "$HEAD"
-  $PY Tools/AdvisorReplay/report.py "$BASE" "$HEAD" > "$OUT/lens_${SET}_${V}_${SALT}.md"
+    --set "$SET" --label head --lens --lens-off "$OFF" $PARAM_ARGS --out "$HEAD"
+  $PY Tools/AdvisorReplay/report.py "$BASE" "$HEAD" > "$OUT/lens_${TAG}_${V}.md"
   echo "== $V =="
-  grep -E "^Top-1, head minus base|regret:" "$OUT/lens_${SET}_${V}_${SALT}.md" || true
+  grep -E "^Top-1, head minus base|regret:" "$OUT/lens_${TAG}_${V}.md" || true
 done
 echo
-echo "Full reports: $OUT/lens_${SET}_<variant>_${SALT}.md ('head' is the lens; 'base' is the plain advisor)."
+echo "Full reports: $OUT/lens_${TAG}_<variant>.md ('head' is the lens; 'base' is the plain advisor)."
