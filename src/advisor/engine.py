@@ -46,9 +46,16 @@ class DraftAdvisor:
     # this many points (15 points is one standard deviation of win rate).
     ARCH_REASON_POINTS = 5.0
 
-    def __init__(self, set_metrics, taken_cards: List[Dict]):
+    def __init__(self, set_metrics, taken_cards: List[Dict], lens_factory=None):
+        """lens_factory: optional callable(set_metrics, pool) -> ArchetypeLens.
+
+        With no factory the advisor scores exactly as before. With one, the
+        archetype part of the score follows the lens's lane probabilities and
+        the lens adds key-card and pack-1 flexibility adjustments.
+        """
         self.metrics = set_metrics
         self.pool = taken_cards or []
+        self.lens = lens_factory(set_metrics, self.pool) if lens_factory else None
 
         # 1. Base statistical baselines
         self.global_mean, self.global_std = self.metrics.get_metrics(
@@ -123,6 +130,12 @@ class DraftAdvisor:
             for i, c in enumerate(pack_cards_sorted)
         }
 
+        pack_mean_mass = (
+            statistics.mean(self.lens.castable_mass(c) for c in pack_cards)
+            if self.lens
+            else 0.0
+        )
+
         recommendations = []
         for card in pack_cards:
             try:
@@ -153,9 +166,10 @@ class DraftAdvisor:
                 arch_points = base_score - self._score_from_wr(raw_gihwr)
                 if abs(arch_points) >= self.ARCH_REASON_POINTS:
                     word = "Better" if arch_points > 0 else "Worse"
-                    reasons.append(
-                        f"{word} in {self.main_archetype} ({arch_points:+.1f})"
-                    )
+                    lane = (
+                        self.lens.expected_delta(card)[1] if self.lens else ""
+                    ) or self.main_archetype
+                    reasons.append(f"{word} in {lane} ({arch_points:+.1f})")
                 is_on_lane = is_castable(card, self.main_colors)
                 if len(self.main_colors) >= 2 and is_on_lane:
                     base_score *= 1.3 if needs_playables else 1.1
@@ -174,6 +188,19 @@ class DraftAdvisor:
                 if role_reason:
                     reasons.append(role_reason)
 
+                # --- STEP 5b: Archetype Lens (key cards, pack-1 flexibility) ---
+                flex_mult = 1.0
+                if self.lens:
+                    key_mult, key_reason = self.lens.key_card_bonus(card)
+                    role_mult = min(1.5, role_mult * key_mult)
+                    if key_reason:
+                        reasons.append(key_reason)
+                    flex_mult = self.lens.flexibility_mult(
+                        card, pack_number, effective_pick, pack_mean_mass
+                    )
+                    if flex_mult >= 1.03:
+                        reasons.append("Keeps Lanes Open")
+
                 # --- STEP 6: Wheel chance (shown, not scored) ---
                 rank_in_pack = pack_ranks.get(name, 99)
                 wheel_pct = self._wheel_chance(
@@ -185,7 +212,7 @@ class DraftAdvisor:
 
                 # === MASTER ALGORITHM ===
                 final_score = (
-                    (base_score + power_bonus) * cast_mult * role_mult
+                    (base_score + power_bonus) * cast_mult * role_mult * flex_mult
                 )
 
                 is_basic_land = name in constants.BASIC_LANDS or (
@@ -522,6 +549,10 @@ class DraftAdvisor:
                 self.ARCH_WEIGHT_START
                 + (ramp_pick / self.ARCH_RAMP_PICKS) * self.ARCH_WEIGHT_RAMP
             )
+            if self.lens:
+                delta, _ = self.lens.expected_delta(card)
+                return self._score_from_wr(global_wr + arch_weight * delta)
+
             arch_stats = stats.get(self.main_archetype, {})
             arch_wr = float(arch_stats.get("gihwr", global_wr))
 

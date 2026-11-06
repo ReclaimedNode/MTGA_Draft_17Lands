@@ -239,7 +239,13 @@ class DraftApp:
                 if self.overlay_window:
                     self.overlay_window.set_advisor_visible(s.advisor_enabled)
             if (
-                key in ["result_format", "card_colors_enabled", "advisor_enabled"]
+                key
+                in [
+                    "result_format",
+                    "card_colors_enabled",
+                    "advisor_enabled",
+                    "archetype_lens_enabled",
+                ]
                 or key is None
             ):
                 self._refresh_ui_data()

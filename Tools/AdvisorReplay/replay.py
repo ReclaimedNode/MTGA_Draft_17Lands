@@ -28,7 +28,7 @@ DECK_SIZE = 23
 class App:
     """The advisor, deck builder and card data, from the src/ on sys.path."""
 
-    def __init__(self, dataset_path):
+    def __init__(self, dataset_path, lens=False, set_code=""):
         from src import card_logic, constants
         from src.advisor.engine import DraftAdvisor
         from src.dataset import Dataset
@@ -50,6 +50,12 @@ class App:
         if not self.dataset.get_card_ratings():
             raise SystemExit(f"Could not load dataset {dataset_path}")
         self.metrics = SetMetrics(self.dataset)
+        # --lens: score with the Archetype Lens (older copies of the app lack it).
+        self.lens_factory = None
+        if lens:
+            from src.advisor.archetype_lens import make_lens_factory
+
+            self.lens_factory = make_lens_factory(self.dataset, set_code)
 
         # The dump names double-faced cards by their front face only.
         self.full_names = {}
@@ -79,7 +85,12 @@ class App:
 
     def advise(self, pack, pool, pack_no, pick_no):
         """{card name: advisor score}, best first."""
-        recs = self.DraftAdvisor(self.metrics, pool).evaluate_pack(
+        advisor = (
+            self.DraftAdvisor(self.metrics, pool, lens_factory=self.lens_factory)
+            if self.lens_factory
+            else self.DraftAdvisor(self.metrics, pool)
+        )
+        recs = advisor.evaluate_pack(
             pack, pick_no, current_pack=pack_no
         )
         scores = {}
@@ -194,12 +205,17 @@ def main(argv=None):
     parser.add_argument("--set", default="", help="Set code, for the report")
     parser.add_argument("--label", required=True, help="base or head")
     parser.add_argument(
+        "--lens",
+        action="store_true",
+        help="Score with the Archetype Lens (compare a --lens head with a plain base)",
+    )
+    parser.add_argument(
         "--out", required=True, help="Where to write the results (.json)"
     )
     args = parser.parse_args(argv)
 
     sys.path.insert(0, os.path.abspath(args.src))
-    app = App(args.dataset)
+    app = App(args.dataset, lens=args.lens, set_code=args.set)
     with gzip.open(args.drafts, "rt", encoding="utf-8") as f:
         drafts = json.load(f)
 

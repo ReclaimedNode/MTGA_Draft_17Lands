@@ -8,6 +8,18 @@ Magic: The Gathering Arena draft tool that utilizes 17Lands data.
 
 **Supported Events:** Premier Draft, Traditional Draft, Quick Draft, Sealed, Traditional Sealed, and Cube.
 
+> **This fork adds the Archetype Lens:** color-pair-aware pick scoring (lane probabilities from pick 1, archetype overperformers, per-set key-card sheets, and pack-1 lane flexibility), plus a one-command backtest against real 17Lands drafts. See [docs/ARCHETYPE_LENS.md](docs/ARCHETYPE_LENS.md). Toggle it in File → Preferences.
+>
+> **Running from source on a Mac:**
+> ```sh
+> brew install python@3.13 python-tk@3.13     # Tk is needed for the window
+> git clone <this fork> && cd MTGA_Draft_17Lands
+> python3.13 -m pip install --user poetry
+> python3.13 -m poetry install
+> python3.13 -m poetry run python main.py
+> ```
+> In Arena, turn on Options → Account → **Detailed Logs (Plugin Support)**. The log is at `~/Library/Logs/Wizards Of The Coast/MTGA/Player.log`.
+
 ## Table of Contents
 
 - [Security, Verification & macOS Gatekeeper](#security-verification--macos-gatekeeper)

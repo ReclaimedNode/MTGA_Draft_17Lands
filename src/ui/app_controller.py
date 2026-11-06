@@ -14,6 +14,7 @@ from typing import Dict
 from src import constants
 from src.configuration import write_configuration
 from src.advisor.engine import DraftAdvisor
+from src.advisor.archetype_lens import make_lens_factory
 from src.signals import SignalCalculator
 from src.card_logic import filter_options, get_deck_metrics
 from src.app_update import AppUpdate
@@ -225,7 +226,15 @@ class AppController:
 
         recommendations = []
         if self.config.settings.advisor_enabled:
-            advisor = DraftAdvisor(metrics, taken_cards)
+            lens_factory = None
+            if getattr(self.config.settings, "archetype_lens_enabled", False):
+                try:
+                    lens_factory = make_lens_factory(
+                        self.orchestrator.scanner.set_data, es or ""
+                    )
+                except Exception as e:
+                    logging.getLogger(__name__).warning(f"Archetype Lens off: {e}")
+            advisor = DraftAdvisor(metrics, taken_cards, lens_factory=lens_factory)
             recommendations = advisor.evaluate_pack(
                 pack_cards, pi, current_pack=pk,
                 cards_per_pick=cards_per_pick,

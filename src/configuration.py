@@ -97,6 +97,8 @@ class Settings(BaseModel):
     auto_sync_datasets: bool = True
     show_splash_screen: bool = True
     advisor_enabled: bool = True
+    # Color-pair-aware scoring (src/advisor/archetype_lens.py).
+    archetype_lens_enabled: bool = True
 
     # System Paths (Restored)
     arena_log_location: str = ""

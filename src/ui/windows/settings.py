@@ -117,6 +117,7 @@ class SettingsWindow(tkinter.Toplevel):
             ("Enable Draft Log Creation", "draft_log_enabled"),
             ("Show Splash Screen on Startup", "show_splash_screen"),
             ("Show Draft Advisor", "advisor_enabled"),
+            ("Archetype Lens (color-pair aware picks)", "archetype_lens_enabled"),
         ]
 
         for i, (label, key) in enumerate(features):
@@ -195,6 +196,7 @@ class SettingsWindow(tkinter.Toplevel):
             "draft_log_enabled",
             "show_splash_screen",
             "advisor_enabled",
+            "archetype_lens_enabled",
         ]
 
         for key in checkbox_keys:

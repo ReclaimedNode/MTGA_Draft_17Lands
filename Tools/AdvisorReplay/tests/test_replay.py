@@ -93,3 +93,20 @@ def test_rank_and_regret():
     assert [replay.rank_of(scores, n) for n in "abc"] == [0, 2, 1]
     assert replay.regret(scores, "a") == 0
     assert replay.regret(scores, "b") == pytest.approx(2 / 0.8165, rel=1e-3)
+
+
+def test_lens_replay_matches_drafts_with_plain_replay(tmp_path, names):
+    drafts = tmp_path / "drafts.json.gz"
+    with gzip.open(drafts, "wt") as f:
+        json.dump([draft(names, 30)], f)
+    outs = {}
+    for label, extra in (("base", []), ("head", ["--lens"])):
+        out = tmp_path / f"{label}.json"
+        replay.main(
+            ["--src", ROOT, "--drafts", str(drafts), "--dataset", DATASET,
+             "--set", "MKM", "--label", label, "--out", str(out)] + extra
+        )
+        outs[label] = json.loads(out.read_text())
+    base, head = outs["base"]["drafts"][0], outs["head"]["drafts"][0]
+    assert len(base["picks"]) == len(head["picks"]) > 0
+    assert head["deck_score"] == base["deck_score"]  # the lens only changes picks
