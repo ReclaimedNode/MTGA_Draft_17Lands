@@ -55,8 +55,10 @@ for SET in $SETS; do
     REG=$(grep -E "regret:" "$REPORT" | awk -F'|' '{print $5}' | sed -E 's/\*//g; s/^ +| +$//g')
     echo "  top-1 $TOP1, regret $REG"
     echo "| $SET | $LABEL | $TOP1 | $REG |" >> "$SUMMARY"
-    # Keep each setting's report.
-    cp "$REPORT" "results/lens_${SET}_${EVENT}_${SALT}_${LABEL//[^A-Za-z0-9_.=]/_}.md"
+    # Keep each setting's report (the default's is already in place).
+    if [ "$LABEL" != "default" ]; then
+      cp "$REPORT" "results/lens_${SET}_${EVENT}_${SALT}_${LABEL//[^A-Za-z0-9_.=]/_}.md"
+    fi
   done
 done
 
