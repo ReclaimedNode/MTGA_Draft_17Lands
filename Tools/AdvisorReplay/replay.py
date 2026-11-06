@@ -218,7 +218,8 @@ def main(argv=None):
     parser.add_argument(
         "--lens-off",
         default="",
-        help="With --lens, switch pieces off: any of delta,key,flex (comma-separated)",
+        help="With --lens, the pieces to switch off: any of delta,key,flex "
+        "(comma-separated). Empty, the default here, turns all three on.",
     )
     parser.add_argument(
         "--out", required=True, help="Where to write the results (.json)"

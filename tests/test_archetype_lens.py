@@ -5,6 +5,15 @@ import os
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def all_pieces_on():
+    """Most tests exercise every piece; the app's default switches some off."""
+    saved = ArchetypeLens.DISABLED
+    ArchetypeLens.DISABLED = frozenset()
+    yield
+    ArchetypeLens.DISABLED = saved
+
 from src import constants
 from src.advisor import archetype_lens as al
 from src.advisor.archetype_lens import (
@@ -171,3 +180,7 @@ def test_advisor_with_lens_runs_on_real_data(mkm):
 
 def test_make_lens_factory_without_data():
     assert make_lens_factory(Dataset(), "X") is None
+
+
+def test_defaults_switch_off_key_and_flex():
+    assert ArchetypeLens.DEFAULT_DISABLED == frozenset({"key", "flex"})

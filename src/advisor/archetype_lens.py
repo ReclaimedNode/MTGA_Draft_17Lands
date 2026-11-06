@@ -226,9 +226,12 @@ class ArchetypeSheet:
 class ArchetypeLens:
     """Lane probabilities for one pool, and the card adjustments built on them."""
 
-    # Pieces that can be switched off (for backtesting): "delta" (#1),
-    # "key" (#2), "flex" (#3).
-    DISABLED: frozenset = frozenset()
+    # Pieces that can be switched off: "delta" (#1), "key" (#2), "flex" (#3).
+    # Off by default: key and flex. Replaying 2,000 FRA drafts (Nov 2026),
+    # #1 alone matched drafters' picks as well as all three (+0.2 top-1 vs
+    # the plain advisor) with the best regret; #2 and #3 added nothing.
+    DEFAULT_DISABLED: frozenset = frozenset({"key", "flex"})
+    DISABLED: frozenset = DEFAULT_DISABLED
     # Lane model
     PRIOR_WEIGHT = 0.15
     DELTA_TIP = 0.25  # how much the pair's overall deck win rate matters
