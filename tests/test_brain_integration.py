@@ -145,12 +145,15 @@ class TestBrainIntegration:
             # PATCH: Prevent the app's internal timer from conflicting with test logic
             with patch("src.ui.app.DraftApp._schedule_update"):
                 app = DraftApp(root, scanner, config)
-                yield {"app": app, "log": log_file, "root": root}
+                yield {"app": app, "log": log_file, "root": root, "config": config}
 
         root.destroy()
 
     def test_pro_logic_scenarios(self, env):
         app, log, root = env["app"], env["log"], env["root"]
+        # These are the plain advisor's castability rules. With the Archetype
+        # Lens on, deck value stands in for them (see test_lens_scores_the_pack).
+        env["config"].settings.archetype_lens_enabled = False
 
         # 1. Establish Green Lane with a Black splash option
         # 3 Green Hulks + 1 BG Dual Land
@@ -196,6 +199,32 @@ class TestBrainIntegration:
         # It bypasses the uncastable penalty and scores ~39.0.
         assert "Black Removal Single Pip" in scores
         assert scores["Black Removal Single Pip"] > scores["Red Bomb Double Pip"]
+
+    def test_lens_scores_the_pack(self, env):
+        """With the lens on (the default), the pack is scored by deck value."""
+        app, log, root = env["app"], env["log"], env["root"]
+        assert env["config"].settings.archetype_lens_enabled
+
+        with open(log, "a") as f:
+            f.write(
+                '[UnityCrossThreadLogger]Draft.Notify {"draftId":"1","SelfPick":2,"SelfPack":1,'
+                '"PackCards":"101,102,103,104"}\n'
+            )
+        app._update_loop()
+        for _ in range(5):
+            root.update()
+
+        tree = app.dashboard.get_treeview("pack")
+        scores = {}
+        for r in tree.get_children():
+            vals = tree.item(r)["values"]
+            if len(vals) > 1:
+                scores[str(vals[0]).replace("⭐ ", "")] = float(vals[1])
+
+        assert len(scores) == 4
+        # Nothing is taken yet, so no lane holds the best card back.
+        assert max(scores, key=scores.get) == "Red Bomb Double Pip"
+        assert scores["Red Bomb Double Pip"] > scores["Green Hulk"] > scores["Wheeling Dork"]
 
     def test_wheel_greed_logic(self, env):
         app, log, root = env["app"], env["log"], env["root"]
