@@ -135,11 +135,8 @@ class DraftAdvisor:
             str(c.get("name", "Unknown")).strip() for c in pack_cards_sorted
         ]
 
-        pack_mean_mass = (
-            statistics.mean(self.lens.castable_mass(c) for c in pack_cards)
-            if self.lens
-            else 0.0
-        )
+        masses = [self.lens.castable_mass(c) for c in pack_cards] if self.lens else []
+        pack_mean_mass = statistics.mean(masses) if masses else 0.0
 
         recommendations = []
         for card in pack_cards:
