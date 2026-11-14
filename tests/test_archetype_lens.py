@@ -184,3 +184,110 @@ def test_make_lens_factory_without_data():
 
 def test_defaults_switch_off_key_and_flex():
     assert ArchetypeLens.DEFAULT_DISABLED == frozenset({"key", "flex"})
+
+
+# --- Fit and deck value ("value" mode) -------------------------------------
+
+
+def _sheet(cards):
+    return ArchetypeSheet.build({str(i): c for i, c in enumerate(cards)})
+
+
+def test_fit_is_the_gain_less_the_pairs_level():
+    # Every UB card does 3 points better in UB: that's the pair's level, not fit.
+    cards = [card(f"c{i}", ["U"], 55.0, {"UB": 58.0}, samples=50000) for i in range(6)]
+    star = card("star", ["U"], 55.0, {"UB": 62.0}, samples=50000)
+    sheet = _sheet(cards + [star])
+    assert sheet.levels["UB"] == pytest.approx(3.0 + 4.0 / 7)
+    assert sheet.fit(cards[0], "UB") < 0 < sheet.fit(star, "UB")
+    assert sheet.fit(star, "UB") < 62.0 - 55.0 - sheet.levels["UB"]  # shrunk
+    assert sheet.fit(star, "WU") == 0.0  # no rate there
+
+
+def test_fit_shrinks_small_samples_harder():
+    filler = [card(f"c{i}", ["U"], 55.0, {"UB": 55.0}, samples=50000) for i in range(8)]
+    big = card("big", ["U"], 55.0, {"UB": 60.0}, samples=20000)
+    small = card("small", ["U"], 55.0, {"UB": 60.0}, samples=100)
+    sheet = _sheet(filler + [big, small])
+    assert 0 < sheet.fit(small, "UB") < sheet.fit(big, "UB")
+    assert sheet.fit(card("tiny", ["U"], 55.0, {"UB": 70.0}, samples=10), "UB") == 0.0
+
+
+def test_deck_value_first_pick_prefers_the_card_that_fits_more_lanes():
+    lens = ArchetypeLens(FakeMetrics(), [])
+    mono = lens.deck_value(card("mono", ["U"], 58.0))[0]
+    gold = lens.deck_value(card("gold", ["U", "B"], 58.0))[0]
+    rock = lens.deck_value(card("rock", [], 58.0, mana_cost="{3}", types=["Artifact"]))[0]
+    assert rock > mono > gold
+    # A card that goes into every lane's deck scores its own worth: +1 SD.
+    assert rock == pytest.approx(1.0 + ArchetypeLens.VALUE_TIEBREAK, abs=1e-6)
+
+
+def test_deck_value_follows_the_pool():
+    pool = [card(f"u{i}", ["U"], 58.0) for i in range(6)] + [
+        card(f"b{i}", ["B"], 58.0) for i in range(6)
+    ]
+    lens = ArchetypeLens(FakeMetrics(), pool)
+    on = lens.deck_value(card("on", ["B"], 57.0))
+    off = lens.deck_value(card("off", ["R"], 61.0))
+    assert on[0] > off[0]
+    assert on[1] == "UB"
+    # Off-lane cards still rank by win rate among themselves.
+    assert off[0] > lens.deck_value(card("off2", ["R"], 56.0))[0]
+
+
+def test_deck_value_counts_fit_in_the_lane():
+    filler = [card(f"c{i}", ["U"], 55.0, {"UB": 55.0}, samples=50000) for i in range(8)]
+    fits = card("fits", ["B"], 56.0, {"UB": 60.0}, samples=20000)
+    plain = card("plain", ["B"], 56.5, {"UB": 56.5}, samples=20000)
+    sheet = _sheet(filler + [fits, plain])
+    pool = [card(f"u{i}", ["U"], 58.0) for i in range(6)] + [
+        card(f"b{i}", ["B"], 58.0) for i in range(6)
+    ]
+    lens = ArchetypeLens(FakeMetrics(), pool, sheet=sheet)
+    points, lane, fit = lens.deck_value(fits)
+    assert lane == "UB" and fit > 0
+    assert points > lens.deck_value(plain)[0]
+
+
+def test_deck_value_measures_a_card_against_the_one_it_pushes_out():
+    pool = [card(f"u{i}", ["U"], 58.0) for i in range(ArchetypeLens.DECK_SPELLS)]
+    lens = ArchetypeLens(FakeMetrics(), pool)
+    worse = lens.deck_value(card("worse", ["U"], 57.0))[0]
+    better = lens.deck_value(card("better", ["U"], 61.0))[0]
+    # 57 doesn't make a deck of 58s; 61 replaces one, for a gain of 1 SD.
+    assert worse == pytest.approx(ArchetypeLens.REPLACEMENT, abs=0.1)
+    assert better == pytest.approx(ArchetypeLens.REPLACEMENT + 1.0, abs=0.1)
+    boosted = lens.deck_value(card("better", ["U"], 61.0), boost=1.25)[0]
+    assert boosted > better
+    assert lens.deck_value(card("worse", ["U"], 57.0), boost=1.5)[0] == pytest.approx(worse)
+
+
+def test_unrated_cards_score_below_rated_ones():
+    lens = ArchetypeLens(FakeMetrics(), [])
+    assert lens.deck_value(card("unrated", ["U"], 0.0))[0] < lens.deck_value(card("bad", ["U"], 45.0))[0]
+
+
+def test_advisor_value_mode_keeps_the_lane_and_blend_mode_is_still_there(mkm, monkeypatch):
+    ds, metrics = mkm
+    factory = make_lens_factory(ds, "MKM")
+    cards = list(ds.get_card_ratings().values())
+    rated = [c for c in cards if c["deck_colors"]["All Decks"].get("gihwr", 0) > 0]
+    blue = [c for c in rated if c.get("colors") == ["U"]][:8]
+    black = [c for c in rated if c.get("colors") == ["B"]][:8]
+    red = sorted(
+        (c for c in rated if c.get("colors") == ["R"]),
+        key=lambda c: -c["deck_colors"]["All Decks"]["gihwr"],
+    )[:3]
+    pack = red + [c for c in rated if c.get("colors") in (["U"], ["B"])][16:22]
+
+    monkeypatch.setattr(ArchetypeLens, "MODE", "value")
+    value = DraftAdvisor(metrics, blue + black, lens_factory=factory).evaluate_pack(pack, 3, 2)
+    assert len(value) == len(pack)
+    top = next(c for c in pack if c["name"] == value[0].card_name)
+    assert top.get("colors") in (["U"], ["B"])
+
+    monkeypatch.setattr(ArchetypeLens, "MODE", "blend")
+    blend = DraftAdvisor(metrics, blue + black, lens_factory=factory).evaluate_pack(pack, 3, 2)
+    assert len(blend) == len(pack)
+    assert [r.contextual_score for r in blend] != [r.contextual_score for r in value]

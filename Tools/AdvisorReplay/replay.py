@@ -28,7 +28,7 @@ DECK_SIZE = 23
 class App:
     """The advisor, deck builder and card data, from the src/ on sys.path."""
 
-    def __init__(self, dataset_path, lens=False, set_code="", lens_off="", lens_params=()):
+    def __init__(self, dataset_path, lens=False, set_code="", lens_off="", lens_params=(), lens_mode=""):
         from src import card_logic, constants
         from src.advisor.engine import DraftAdvisor
         from src.dataset import Dataset
@@ -60,6 +60,8 @@ class App:
             if unknown:
                 raise SystemExit(f"--lens-off: unknown pieces {sorted(unknown)}")
             ArchetypeLens.DISABLED = off
+            if lens_mode:
+                ArchetypeLens.MODE = lens_mode
             set_lens_params(lens_params)
 
             self.lens_factory = make_lens_factory(self.dataset, set_code)
@@ -239,6 +241,12 @@ def main(argv=None):
         "(comma-separated). Empty, the default here, turns all three on.",
     )
     parser.add_argument(
+        "--lens-mode",
+        default="",
+        choices=["", "blend", "value"],
+        help="With --lens, how the lens combines with the advisor (default: the app's)",
+    )
+    parser.add_argument(
         "--lens-param",
         action="append",
         default=[],
@@ -258,6 +266,7 @@ def main(argv=None):
         set_code=args.set,
         lens_off=args.lens_off,
         lens_params=args.lens_param,
+        lens_mode=args.lens_mode,
     )
     with gzip.open(args.drafts, "rt", encoding="utf-8") as f:
         drafts = json.load(f)

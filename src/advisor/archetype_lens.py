@@ -86,9 +86,68 @@ class ArchetypeSheet:
     KEY_CARDS_PER_PAIR = 10
     THEMES_PER_PAIR = 3
     SHRINK_K = 400  # games; a delta from K games counts half
+    # For fit(): a pair rate needs this many games to count at all, and the
+    # spread of true fits is estimated from cards with at least FIT_SPREAD_GAMES.
+    FIT_MIN_GAMES = 50
+    FIT_SPREAD_GAMES = 200
+    GAME_VARIANCE = 2500.0  # of one game's result, in win-rate points squared
+    FIT_SPREAD_FLOOR = 0.25
 
     def __init__(self, pairs: Optional[Dict[str, Dict]] = None):
         self.pairs: Dict[str, Dict] = pairs or {p: {} for p in PAIRS}
+        # Each pair's level: how much better its cards do there than overall,
+        # on average. fit() measures a card against it.
+        self.levels: Dict[str, float] = {p: 0.0 for p in PAIRS}
+        self.fit_spread = 1.0  # variance of true fits, in win-rate points squared
+        self._fit_cache: Dict[str, Dict[str, float]] = {}
+
+    def _learn_fit(self, unique: Dict[str, Dict]) -> None:
+        """Set each pair's level and the spread of fits from the set's cards."""
+        gains: Dict[str, List[Tuple[float, int]]] = {p: [] for p in PAIRS}
+        for card in unique.values():
+            overall = _gihwr(card)
+            if overall <= 0:
+                continue
+            for pair in castable_pairs(card):
+                n, in_pair = _samples(card, pair), _gihwr(card, pair)
+                if in_pair > 0 and n >= self.FIT_MIN_GAMES:
+                    gains[pair].append((in_pair - overall, n))
+        squares, noise, count = 0.0, 0.0, 0
+        for pair, rows in gains.items():
+            games = sum(n for _, n in rows)
+            self.levels[pair] = sum(g * n for g, n in rows) / games if games else 0.0
+            for g, n in rows:
+                if n >= self.FIT_SPREAD_GAMES:
+                    squares += (g - self.levels[pair]) ** 2
+                    noise += self.GAME_VARIANCE / n
+                    count += 1
+        if count:
+            self.fit_spread = max(self.FIT_SPREAD_FLOOR, (squares - noise) / count)
+        self._fit_cache.clear()
+
+    def fit(self, card: Dict, pair: str) -> float:
+        """How much better the card does in the pair than the pair's cards do on
+        average, in win-rate points.
+
+        A card's gain in a pair is partly the pair's level: every card of a
+        strong pair wins more there. Fit is what is left, and within a pair it
+        is the part that goes with decks winning. It is pulled toward 0 by how
+        noisy the pair rate is against how much true fits vary, so choosing the
+        best-looking fits doesn't choose the luckiest samples.
+        """
+        name = str(card.get(constants.DATA_FIELD_NAME, ""))
+        cached = self._fit_cache.get(name)
+        if cached is None:
+            cached = {}
+            overall = _gihwr(card)
+            for p in castable_pairs(card) if overall > 0 else []:
+                n, in_pair = _samples(card, p), _gihwr(card, p)
+                if in_pair > 0 and n >= self.FIT_MIN_GAMES:
+                    keep = self.fit_spread / (self.fit_spread + self.GAME_VARIANCE / n)
+                    cached[p] = (in_pair - overall - self.levels[p]) * keep
+            if name:
+                self._fit_cache[name] = cached
+        return cached.get(pair, 0.0)
 
     @classmethod
     def shrunk_delta(cls, card: Dict, pair: str) -> float:
@@ -147,6 +206,7 @@ class ArchetypeSheet:
             }
 
         sheet = cls(pairs)
+        sheet._learn_fit(unique)
         if set_code:
             sheet.apply_overrides(set_code)
         return sheet
@@ -250,6 +310,32 @@ class ArchetypeLens:
     FLEX_WEIGHT = 0.15
     FLEX_LAST_PICK = 10  # pack 1 only, fading to nothing by this pick
 
+    # How the lens and the advisor combine.
+    #   "blend": the lens supplies the archetype part of the advisor's score
+    #            (#1) and its two multipliers (#2, #3), as it always has.
+    #   "value": the lens scores the card by how much it raises the deck you
+    #            are likely to end with (deck_value below). That one number
+    #            replaces the advisor's archetype blend, on-lane bonus and
+    #            castability multiplier.
+    MODE = "value"
+    # Deck value, in standard deviations of win rate:
+    # A point of fit against a point of overall win rate. Upstream's held-out
+    # whole-deck test (experiments/2026-11-08-pair-parts) put it at 1.29.
+    FIT_WEIGHT = 1.3
+    REPLACEMENT = -0.5  # a card this far below the format's mean adds nothing
+    DECK_SPELLS = 23
+    # How firmly the lanes are held: the softness of the maximum over lanes,
+    # from an empty pool to VALUE_TEMP_PICKS cards.
+    VALUE_TEMP_START = 0.5
+    VALUE_TEMP_END = 0.2
+    VALUE_TEMP_PICKS = 30
+    VALUE_TIEBREAK = 0.02  # orders cards that add nothing by win rate
+    # In "value" mode, how much of the advisor's pack-relative power bonus and
+    # composition multipliers to keep (1 = all, 0 = none). The composition
+    # multiplier scales what the card adds to the deck, not its whole score.
+    VALUE_POWER_BONUS = 0.0
+    VALUE_ROLE_WEIGHT = 1.0
+
     def __init__(
         self,
         set_metrics,
@@ -278,6 +364,7 @@ class ArchetypeLens:
         self._pool_tags = Counter()
         for c in self.pool:
             self._pool_tags.update(set(c.get("tags", [])))
+        self._value_state: Optional[Tuple[Dict[str, float], Dict[str, float], float, float]] = None
 
     # --- Lanes ----------------------------------------------------------
 
@@ -344,6 +431,89 @@ class ArchetypeLens:
                 best_pair, best_contrib = p, contrib
         credit = min(1.0, mass / self.MASS_FULL_CREDIT)
         return (total / mass) * credit, best_pair
+
+    # --- Deck value ("value" mode) ----------------------------------------
+
+    def card_value(self, card: Dict, pair: str) -> Optional[float]:
+        """The card's worth in a deck of this pair, in SDs of win rate: its
+        overall rate plus FIT_WEIGHT times its fit there. None if unrated."""
+        overall = _gihwr(card)
+        if overall <= 0:
+            return None
+        return (
+            overall - self.global_mean + self.FIT_WEIGHT * self.sheet.fit(card, pair)
+        ) / self.global_std
+
+    def _lane_decks(self):
+        """For each pair, the strength of the deck the pool makes there (its
+        best DECK_SPELLS castable cards, counted above REPLACEMENT) and the
+        value a new card must beat to make that deck."""
+        if self._value_state is None:
+            strength, cut = {}, {}
+            for pair in PAIRS:
+                values = []
+                for card in self.pool:
+                    if "Basic" in card.get(constants.DATA_FIELD_TYPES, []):
+                        continue
+                    if pair not in self._pairs(card):
+                        continue
+                    v = self.card_value(card, pair)
+                    if v is not None and v > self.REPLACEMENT:
+                        values.append(v)
+                values.sort(reverse=True)
+                deck = values[: self.DECK_SPELLS]
+                strength[pair] = sum(v - self.REPLACEMENT for v in deck)
+                cut[pair] = deck[-1] if len(deck) >= self.DECK_SPELLS else self.REPLACEMENT
+            progress = min(1.0, len(self.pool) / self.VALUE_TEMP_PICKS)
+            temp = self.VALUE_TEMP_START + (self.VALUE_TEMP_END - self.VALUE_TEMP_START) * progress
+            temp = max(0.05, temp)
+            self._value_state = (strength, cut, temp, self._soft_max(strength.values(), temp))
+        return self._value_state
+
+    @staticmethod
+    def _soft_max(values, temp: float) -> float:
+        values = list(values)
+        top = max(values)
+        return top + temp * math.log(sum(math.exp((v - top) / temp) for v in values))
+
+    def deck_value(self, card: Dict, boost: float = 1.0) -> Tuple[float, str, float]:
+        """(points, lane, fit): how much taking the card raises your deck.
+
+        Each pair has a deck in the making: the pool's best cards castable
+        there. The card adds to a pair's deck what it is worth there above the
+        card it would push out, and nothing where it can't be cast. Your deck
+        is taken as a soft maximum over the ten pairs' decks: early on every
+        lane counts, so a card castable in more of them is worth more; as the
+        pool commits, only the lanes still in reach count.
+
+        points is on the same scale as a win rate in SDs from the format mean:
+        a card that goes straight into the deck of a settled lane scores its
+        own worth there. lane is the pair the card would most likely be played
+        in and fit is its fit there (win-rate points), for the reason text.
+        boost scales what the card adds, for the advisor's composition needs:
+        a card the deck can't use stays at nothing however much it is needed.
+        """
+        strength, cut, temp, before = self._lane_decks()
+        after, best_lane, best_total = [], "", -1e9
+        pairs = set(self._pairs(card))
+        for pair in PAIRS:
+            gain = 0.0
+            if pair in pairs:
+                v = self.card_value(card, pair)
+                if v is not None:
+                    gain = max(0.0, v - cut[pair])
+                if strength[pair] + gain > best_total:
+                    best_total, best_lane = strength[pair] + gain, pair
+            after.append(strength[pair] + gain)
+        raised = self._soft_max(after, temp) - before
+        overall = _gihwr(card)
+        tiebreak = (
+            self.VALUE_TIEBREAK * (overall - self.global_mean) / self.global_std
+            if overall > 0
+            else -1.0
+        )
+        fit = self.sheet.fit(card, best_lane) if best_lane else 0.0
+        return self.REPLACEMENT + raised * boost + tiebreak, best_lane, fit
 
     # --- #2: key cards and themes ---------------------------------------
 

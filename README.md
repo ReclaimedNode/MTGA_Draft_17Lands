@@ -8,7 +8,7 @@ Magic: The Gathering Arena draft tool that utilizes 17Lands data.
 
 **Supported Events:** Premier Draft, Traditional Draft, Quick Draft, Pick-Two Draft, Contender Draft, Sealed, Traditional Sealed, Arena Direct, and Cube.
 
-> **This fork adds the Archetype Lens:** color-pair-aware pick scoring (lane probabilities from pick 1, archetype overperformers, per-set key-card sheets, and pack-1 lane flexibility), plus a one-command backtest against real 17Lands drafts. See [docs/ARCHETYPE_LENS.md](docs/ARCHETYPE_LENS.md). Toggle it in File → Preferences.
+> **This fork adds the Archetype Lens:** color-pair-aware pick scoring (lane probabilities from pick 1, archetype overperformers, per-set key-card sheets, and pack-1 lane flexibility), plus a one-command backtest against real 17Lands drafts and a whole-draft simulation (`Tools/DraftSim`) that measures the decks the advisor ends up with. Since Nov 13, 2026 the lens scores a card by how much it raises the deck your pool is heading for. See [docs/ARCHETYPE_LENS.md](docs/ARCHETYPE_LENS.md). Toggle it in File → Preferences.
 >
 > **Quick Draft bot model:** `Tools/BotModel/bot_model.sh <SET>` learns what Arena's bots pick from 17Lands Quick Draft data; the advisor then uses it for wheel chances in that set's Quick Drafts. See [docs/BOT_MODEL.md](docs/BOT_MODEL.md).
 >

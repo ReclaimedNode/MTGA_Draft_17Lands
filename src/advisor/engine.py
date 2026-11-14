@@ -48,8 +48,11 @@ class DraftAdvisor:
         """lens_factory: optional callable(set_metrics, pool) -> ArchetypeLens.
 
         With no factory the advisor scores exactly as before. With one, the
-        archetype part of the score follows the lens's lane probabilities and
-        the lens adds key-card and pack-1 flexibility adjustments.
+        lens scores each card by how much it raises the deck the pool is
+        heading for (ArchetypeLens.MODE "value"), in place of the archetype
+        blend, on-lane bonus and castability multiplier. In "blend" mode the
+        lens instead supplies the archetype part of the score from its lane
+        probabilities, plus key-card and pack-1 flexibility adjustments.
         """
         self.metrics = set_metrics
         self.pool = taken_cards or []
@@ -161,32 +164,59 @@ class DraftAdvisor:
                 )
                 power_bonus = max(0, z_score * 10 * iwd_mult) if z_score > 0.5 else 0
 
-                # --- STEP 3: Lane ---
-                # The card's win rate in the lane's pair is already blended into
-                # the base score; say so when it moved the card noticeably, then
-                # favor cards in the lane's colors.
-                arch_points = base_score - self._score_from_wr(raw_gihwr)
-                if abs(arch_points) >= self.ARCH_REASON_POINTS:
-                    word = "Better" if arch_points > 0 else "Worse"
-                    lane = (
-                        self.lens.expected_delta(card)[1] if self.lens else ""
-                    ) or self.main_archetype
-                    reasons.append(f"{word} in {lane} ({arch_points:+.1f})")
-                is_on_lane = is_castable(card, self.main_colors)
-                if len(self.main_colors) >= 2 and is_on_lane:
-                    base_score *= 1.3 if needs_playables else 1.1
+                value_mode = self.lens is not None and self.lens.MODE == "value"
+                if value_mode:
+                    # --- STEPS 3-4, lens "value" mode ---
+                    # One number from the lens stands in for the archetype
+                    # blend, the on-lane bonus and the castability multiplier:
+                    # how much the card raises the deck the pool is heading for.
+                    need_mult, need_reason = self._calculate_composition_bonus(
+                        card, pack_number
+                    )
+                    boost = 1.0 + self.lens.VALUE_ROLE_WEIGHT * (need_mult - 1.0)
+                    points, lane, fit = self.lens.deck_value(card, boost)
+                    base_score = max(0.0, 50.0 + 15.0 * points)
+                    power_bonus *= self.lens.VALUE_POWER_BONUS
+                    fit_points = (
+                        15.0 * self.lens.FIT_WEIGHT * fit / max(0.1, self.global_std)
+                    )
+                    if lane and abs(fit_points) >= self.ARCH_REASON_POINTS:
+                        word = "Better" if fit_points > 0 else "Worse"
+                        reasons.append(f"{word} in {lane} ({fit_points:+.1f})")
+                    cast_mult = 1.0
+                    if self.pool and base_score < self._score_from_wr(raw_gihwr) - 15.0:
+                        reasons.append("Off-Lane")
+                else:
+                    # --- STEP 3: Lane ---
+                    # The card's win rate in the lane's pair is already blended into
+                    # the base score; say so when it moved the card noticeably, then
+                    # favor cards in the lane's colors.
+                    arch_points = base_score - self._score_from_wr(raw_gihwr)
+                    if abs(arch_points) >= self.ARCH_REASON_POINTS:
+                        word = "Better" if arch_points > 0 else "Worse"
+                        lane = (
+                            self.lens.expected_delta(card)[1] if self.lens else ""
+                        ) or self.main_archetype
+                        reasons.append(f"{word} in {lane} ({arch_points:+.1f})")
+                    is_on_lane = is_castable(card, self.main_colors)
+                    if len(self.main_colors) >= 2 and is_on_lane:
+                        base_score *= 1.3 if needs_playables else 1.1
 
-                # --- STEP 4: Castability (Pip-Sensitive Discipline & Premium Splashing) ---
-                cast_mult, cast_reason = self._calculate_castability_v5(
-                    card, pack_number, effective_pick, z_score
-                )
-                if cast_reason:
-                    reasons.append(cast_reason)
+                    # --- STEP 4: Castability (Pip-Sensitive Discipline & Premium Splashing) ---
+                    cast_mult, cast_reason = self._calculate_castability_v5(
+                        card, pack_number, effective_pick, z_score
+                    )
+                    if cast_reason:
+                        reasons.append(cast_reason)
 
                 # --- STEP 5: Composition & Synergies ---
                 role_mult, role_reason = self._calculate_composition_bonus(
                     card, pack_number
                 )
+                if value_mode:
+                    # Already counted, in what the card adds to the deck.
+                    role_reason = role_reason if boost != 1.0 else ""
+                    role_mult = 1.0
                 if role_reason:
                     reasons.append(role_reason)
 
