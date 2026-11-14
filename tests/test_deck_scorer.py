@@ -146,24 +146,34 @@ def test_get_card_rating_three_colors_uses_first_two_in_wubrg_order():
     assert get_card_rating(card, ["G", "U", "W"]) == pytest.approx(61.0)
 
 
-def test_holistic_score_uses_wubrg_archetype_key(mock_metrics):
-    """calculate_holistic_score must read the archetype win rate for the
-    deck's pair (here Dimir: data stored under "UB", deck colors ["B", "U"])."""
+def test_holistic_score_uses_overall_rating_not_the_pairs(mock_metrics):
+    """A card's rate in the deck's pair doesn't move the deck score."""
 
-    def build(arch_key):
+    def score(pair_rate):
         spell = make_card("Dimir Spell", count=23, colors=["U", "B"], gihwr=55.0)
+        spell["deck_colors"]["UB"] = {"gihwr": pair_rate}
+        deck = [make_card("Land", count=17, types=["Land"]), spell]
+        return calculate_holistic_score(
+            deck, colors=["B", "U"], pool_size=45, metrics=mock_metrics
+        )[0]
+
+    assert score(65.0) == score(45.0)
+
+
+def test_holistic_score_falls_back_to_the_pair_rating(mock_metrics):
+    """A card with no overall rate is scored at its rate in the deck's pair,
+    read under the WUBRG-ordered key (Dimir is "UB", deck colors ["B", "U"])."""
+
+    def score(arch_key):
+        spell = make_card("Dimir Spell", count=23, colors=["U", "B"], gihwr=0.0)
         spell["deck_colors"][arch_key] = {"gihwr": 65.0}
-        return [make_card("Land", count=17, types=["Land"]), spell]
+        deck = [make_card("Land", count=17, types=["Land"]), spell]
+        return calculate_holistic_score(
+            deck, colors=["B", "U"], pool_size=45, metrics=mock_metrics
+        )[0]
 
-    with_arch, _ = calculate_holistic_score(
-        build("UB"), colors=["B", "U"], pool_size=45, metrics=mock_metrics
-    )
     # A key that does not exist in real datasets must be ignored.
-    without_arch, _ = calculate_holistic_score(
-        build("BU"), colors=["B", "U"], pool_size=45, metrics=mock_metrics
-    )
-
-    assert with_arch > without_arch
+    assert score("UB") > score("BU")
 
 
 def test_identify_top_pairs(mock_metrics):
@@ -183,8 +193,8 @@ def test_identify_top_pairs(mock_metrics):
     assert set(pairs[0]) == {"W", "U"}
 
 
-def test_holistic_score_domain_bonus(mock_metrics):
-    """3+ color decks get the domain bonus with enough fixing, or a penalty without."""
+def test_holistic_score_missing_fixing(mock_metrics):
+    """3+ color decks are penalized for missing fixing, and get no bonus with it."""
 
     # Scenario A: Greedy 4-color soup (No fixing)
     greedy_deck = [
@@ -196,7 +206,6 @@ def test_holistic_score_domain_bonus(mock_metrics):
     _, notes_greedy = calculate_holistic_score(
         greedy_deck, colors=["W", "U", "B", "R"], pool_size=45, metrics=mock_metrics
     )
-    assert "Domain" not in notes_greedy
     # ...and is penalized for each fixing card short of one per extra color.
     assert f"Greedy Mana Strain (-{3 * -WEIGHTS['missing_fixing']:.1f})" in notes_greedy
 
@@ -218,10 +227,7 @@ def test_holistic_score_domain_bonus(mock_metrics):
     _, notes_supported = calculate_holistic_score(
         supported_deck, colors=["W", "U", "B", "R"], pool_size=45, metrics=mock_metrics
     )
-    assert (
-        f"Supported Domain/Soup (+{WEIGHTS['domain_supported']:.1f})" in notes_supported
-    )
-    assert "Greedy" not in notes_supported
+    assert notes_supported == ""
 
 
 def test_holistic_score_incomplete_deck(mock_metrics):
