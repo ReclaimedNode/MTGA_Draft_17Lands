@@ -78,7 +78,7 @@ How to read it:
   fresh seed and the other four sets weren't used for any choice. The fit
   weight wasn't tuned: 1.3 is upstream's held-out estimate.
 - On imitation, value mode is level with the plain advisor: replaying 2,000
-  FRA drafts (salt merge432), top-1 +0.2 (SE 0.2) and regret -0.005 (SE 0.042) against it. It
+  FRA drafts (salt merge432), top-1 +0.0 (SE 0.2) and regret -0.002 (SE 0.044) against it (rerun Nov 16 after upstream fixed the replay to pass pools in pick order; the simulation always did). It
   agrees with drafters about as often while taking different cards: 18 of 42
   differ from the plain advisor's in a typical simulated draft.
 
