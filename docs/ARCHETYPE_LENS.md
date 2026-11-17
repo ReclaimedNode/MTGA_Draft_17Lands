@@ -82,6 +82,15 @@ How to read it:
   agrees with drafters about as often while taking different cards: 18 of 42
   differ from the plain advisor's in a typical simulated draft.
 
+**After upstream 4.33 (Nov 17, 2026).** 4.33 changed the plain advisor: no
+off-color penalty in pack 1, and the on-lane bonus is always 1.1x. Value mode
+doesn't use either rule, so its decks are unchanged. On the same 2,000 FRA
+pods the 4.33 plain advisor comes out 0.48 points (SE 0.06) below the 4.32
+one on the win model and 0.24 (SE 0.03) below on the app deck score, so value
+minus the plain advisor is now +3.17 (0.09), +2.28 (0.06) without pair terms,
+and +0.30 (0.04) on the app deck score. Report: `results/sim_FRA_4.33.md`. The
+table above is against the 4.32 plain advisor.
+
 Rerun with `Tools/DraftSim/draft_sim.sh FRA 2000`.
 
 ## The earlier pieces ("blend" mode)
